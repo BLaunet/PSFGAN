@@ -65,9 +65,9 @@ class Config:
 
     ## training parameters
     # specify which GPU should be used in CUDA_VISIBLE_DEVICES
-    use_gpu = 0
+    use_gpu = 6
     start_epoch = 0
-    save_per_epoch = 50
+    save_per_epoch = 5
     max_epoch = 50
     img_size = 424
     train_size = 424
