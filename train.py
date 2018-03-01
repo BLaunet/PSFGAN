@@ -1,3 +1,4 @@
+import shutil
 import time
 import argparse
 import tensorflow as tf
@@ -41,10 +42,29 @@ def train(evalset):
 
     saver = tf.train.Saver()
 
+    ##TensorBoard setup
+    tf.summary.scalar('d_loss', model.d_loss)
+    tf.summary.scalar('g_loss', model.g_loss)
+    tf.summary.scalar('flux', model.delta)
+    merged = tf.summary.merge_all()
+
+    log_dir = conf.save_path
+    summary_folder = '%s/train'%log_dir
+    if tf.gfile.Exists(log_dir):
+        tf.gfile.DeleteRecursively(log_dir)
+    tf.gfile.MakeDirs(log_dir)
+
+    filter_string = conf.filter_
+    generated_images = {}
+    for _,_,name in data[str(evalset)]():
+        name = name.replace('-'+filter_string+'.npy', '')
+        im_sum = tf.summary.image(name, tf.concat((model.cond, model.gen_img), axis=2))
+        generated_images[name] = im_sum
+    ##
+
     counter = 0
     start_time = time.time()
     out_dir = conf.result_path
-    filter_string = conf.filter_
     if not os.path.exists(conf.save_path):
         os.makedirs(conf.save_path)
     if not os.path.exists(out_dir):
@@ -62,6 +82,7 @@ def train(evalset):
                 log.close()
             except:
                 pass
+        train_writer = tf.summary.FileWriter(summary_folder, sess.graph)
         for epoch in xrange(start_epoch, conf.max_epoch):
             train_data = data["train"]()
             for img, cond, _ in train_data:
@@ -70,12 +91,14 @@ def train(evalset):
                 _, m = sess.run([d_opt, model.d_loss], feed_dict={model.image: img, model.cond: cond})
                 _, M, flux = sess.run([g_opt, model.g_loss, model.delta],
                                       feed_dict={model.image: img, model.cond: cond})
+                summary = sess.run(merged, feed_dict={model.image:img, model.cond:cond})
                 counter += 1
+                train_writer.add_summary(summary,counter)
                 print("Iterate [%d]: time: %4.4f, d_loss: %.8f, g_loss: %.8f, flux: %.8f" \
                       % (counter, time.time() - start_time, m, M, flux))
             if (epoch + 1) % conf.save_per_epoch == 0:
                 # save_path = saver.save(sess, conf.data_path + "/checkpoint/" + "model_%d.ckpt" % (epoch+1))
-                save_path = saver.save(sess, conf.save_path + "/model.ckpt")
+                save_path = saver.save(sess, conf.save_path + "/model_%d.ckpt" % (epoch+1))
                 print("Model at epoch %s saved in file: %s" % (epoch + 1, save_path))
 
                 log = open(conf.save_path + "/log", "w")
@@ -87,6 +110,9 @@ def train(evalset):
                     name = name.replace('-'+filter_string+'.npy', '')
                     pimg, pcond = prepocess_test(img, cond)
                     gen_img = sess.run(model.gen_img, feed_dict={model.image: pimg, model.cond: pcond})
+                    summary_image = sess.run(generated_images[name], feed_dict={model.image:pimg, model.cond:pcond})
+                    train_writer.add_summary(summary_image, (epoch+1))
+
                     gen_img = gen_img.reshape(gen_img.shape[1:])
 
                     fits_recover = conf.unstretch(gen_img[:, :, 0])
